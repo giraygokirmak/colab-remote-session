@@ -1,0 +1,28 @@
+services:
+  mcp:
+    build: .
+    image: colab-remote-mcp:0.1.0
+    restart: unless-stopped
+    # Use a non-loopback public HTTPS origin only behind a trusted TLS proxy.
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+    volumes:
+      - colab-oauth-keyring:/data
+      - type: bind
+        source: ./keyring.password
+        target: /run/keyring.password
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    command:
+      - --public-url=http://127.0.0.1:8000
+      - --keyring-password-file=/run/keyring.password
+
+volumes:
+  colab-oauth-keyring:

@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+.ruff_cache
+__pycache__
+data
+*.password
+keyring.password
+.env
+Dockerfile
+docker-compose.yml
+tests
