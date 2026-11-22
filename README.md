@@ -2,7 +2,33 @@
 
 Standalone Docker MCP server for temporary Google Colab CPU/T4 jobs. Agent code, dependency specifications, file outputs, and streamed kernel events travel over MCP. Google credentials never leave this server.
 
-**This project is independent; it is not a Google, Anthropic, OpenAI, or Codex product.** It requires a Google account that can use Colab and the official `google-colab-cli` PyPI package. No paid runtime or API-key service is used by the MCP server.
+Use this server from OpenCode, Claude Code, or Codex to execute Python on an
+ephemeral Colab runtime while keeping authorization and execution handles on the
+server. Jobs return immediately; agents poll ordered stdout/stderr and kernel
+events, then retrieve explicitly selected output files through MCP resources.
+The server requests only the free standard CPU or T4 runtime. Google Colab
+availability, quotas, and acceptable-use terms still apply.
+
+**This project is independent; it is not a Google, Anthropic, OpenAI, or Codex
+product.** It requires a Google account that can use Colab and the official
+`google-colab-cli` PyPI package. No paid runtime or API-key service is used by
+the MCP server.
+
+## Requirements and capabilities
+
+- Python 3.12 or 3.13 for local development; Docker for the documented deployment.
+- Public OAuth clients using PKCE and Dynamic Client Registration. Access tokens
+  are audience-bound to this server's `/mcp` endpoint.
+- One encrypted file-keyring for Colab credentials; no host credential or
+  environment-variable forwarding into agent code or MCP responses.
+- Bounded streamed event history, client-owned resources, SHA-256-checked
+  captured files, restart recovery, and explicitly reported best-effort cleanup.
+- Only named public-index package requirement specifiers are accepted. User code
+  itself is arbitrary remote Python and is **not** sandboxed by this service.
+
+Start with [Docker quick start](#docker-quick-start), then connect your client
+using its instructions below. There is no host `colab auth` step and no separate
+MCP username/password login.
 
 ## One authorization interaction (not two auth commands)
 
@@ -23,7 +49,14 @@ The server persists Colab's credentials in `keyring` service `google-colab-cli`,
 
 ## Docker quick start
 
-Prerequisites: Docker with volume support and local browser access to the agent's MCP callback as documented by your host. There's no mandatory `docker.sock` access from inside the deployed container.
+Prerequisites: Docker with volume support and local browser access to the agent's
+MCP callback as documented by your host. The following setup creates one named
+volume for persistent credentials, state, and job results, plus a protected
+passphrase file. The container does not need access to the host Docker socket.
+
+The image runs as a non-root user. For the Compose configuration, also review
+the read-only root filesystem, `tmpfs`, capability, and no-new-privileges
+settings below before choosing a public deployment.
 
 ```sh
 docker build --pull -t colab-remote-mcp:0.1.0 .
@@ -46,7 +79,9 @@ docker run --rm -it --name colab-remote-mcp \
 
 Alternatively, use `--keyring-password-stdin` inside an interactive container (`docker run -it`, without the bind). `--keyring-password` is a development/secret-manager fallback only; do not put it in shell history, compose, environment variables, or agent tool arguments.
 
-For non-loopback access, put the single process behind TLS, configure the externally reachable HTTPS origin (no path) using `MCP_PUBLIC_URL=https://mcp.example.org`, and use the compose service as an example. Do not publish HTTP port 8000 directly. The authorization state is not bearer authentication and does not enable `/mcp`; the MCP Submit endpoint only accepts a state issued to a known dynamic client and expires in 30 minutes.
+For non-loopback access, put the single process behind TLS, configure the externally reachable HTTPS origin (no path) using `MCP_PUBLIC_URL=https://mcp.example.org`, and use the compose service as an example. Do not publish HTTP port 8000 directly. The authorization state is not bearer authentication and does not enable `/mcp`;
+`/oauth/complete` accepts only a state issued to a known dynamic client, and its
+pending Google authorization window expires after 30 minutes.
 
 To test locally with MCP Inspector, create a self-signed certificate so RFC 8414 Dev defaults accept HTTPS; it is the user's responsibility to enable testing-only CA trust appropriately. Instructions below use the Docker Compose example, not Google production OAuth.
 
@@ -124,6 +159,15 @@ CPU limits depend on Colab runtime details and ordinary agent-supplied work. The
 
 ## Development/verification
 
+The current local verification run passes **39 tests**, Ruff checks, and Python
+bytecode compilation. These are offline unit and loopback integration checks;
+they do not certify a Docker build, Google authorization, or real Colab quota.
+
+For the Compose deployment, complete the same volume and passphrase-generation
+steps above, then uncomment its loopback port mapping and run `docker compose up
+-d --build`. In a reverse-proxy deployment, change `--public-url` to the exact
+external HTTPS origin and publish the service only through that trusted proxy.
+
 ```sh
 python3.12 -m venv /tmp/colab-mcp-dev
 /tmp/colab-mcp-dev/bin/pip install -e '.[dev]'
@@ -147,5 +191,15 @@ Use regular backups if you care about output retention. Purging old jobs is a de
 ## Production guardrails
 
 Single process (no multi-worker OAuth flows, no shared-in-memory lock across workers), only one active job, an explicit tunnel protecting public binding, no request-body JSON logging, no root shell in runtime image, read-only root filesystem, drop-all capabilities/no-new-privileges, no Docker/client socket mounted. Limit job size (128 KiB code, 32 KiB total dependency text, 64 MiB each/128 MiB per job files, 8 MiB text display) and enforce those at the source and polling layers. Resource reads are protected by client authorization, not only unguessable random job names.
+
+## License
+
+Copyright 2026 Colab Remote MCP contributors.
+
+Licensed under the [Apache License, Version 2.0](LICENSE). You may not use this
+project except in compliance with that license; it is provided on an “AS IS”
+basis, without warranties or conditions of any kind. This project does not
+relicense its Python dependencies, container base image, Google services, or
+other third-party components.
 
 MCP SDK version is pinned to 1.30.0, because this server implements the provider protocol and Streamable HTTP transport supported by that release. Auth metadata is SDK-generated; header parsing, `BearerAuthBackend` RFC 9728 resource matching, and no-store responses are not reimplemented ad hoc. The only custom HTTP auth paths implement the registered callback bridging limited installed-client interaction. A future direct HTTPS Google client is not compatible without adding its own Google Console config/scopes/verification.
