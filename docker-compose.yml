@@ -3,32 +3,30 @@ services:
     build: .
     image: colab-remote-mcp:0.1.0
     restart: unless-stopped
-    # Use a non-loopback public HTTPS origin only behind a trusted TLS proxy.
-    # ports:
-    #   - "127.0.0.1:8000:8000"
+    # Non-loopback plain HTTP is intended for a trusted local tunnel/proxy only.
+    ports:
+      - "6012:8000"
+    # The only persistent storage is this named volume. In particular, no host
+    # password file, Docker socket, SSH agent or environment credential is bound.
     volumes:
       - colab-oauth-keyring:/data
-      - type: bind
-        source: ./keyring.password
-        # If the source is missing, Docker can auto-create /run/secrets/keyring.password
-        # as a directory. The entrypoint stops with an actionable error, not a loop.
-        target: /run/secrets/keyring.password
-        read_only: true
+    # If the volume is newly created on an existing service, reset its ownership
+    # once with docker compose run --rm --user root mcp chown 10001:10001 /data.
+    # New empty volumes receive uid 10001 from the Docker image automatically.
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
-      - /run/secrets:size=64m,mode=1777
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     init: true
-    # Validates file type, ownership and mode before reading the passphrase in config.
-    # No passphrase value is included in argv, environment or error output.
+    # Creates a fresh random key at /data/secrets/keyring.password only when
+    # absent, then reuses it unchanged across restarts. No host bind or prompt.
     entrypoint: ["python", "/usr/local/bin/colab-remote-keyring-entrypoint"]
     command:
-      - --public-url=http://127.0.0.1:8000
-      - --keyring-password-file=/run/secrets/keyring.password
+      - --host=0.0.0.0
+      # Missing HTTPS public origin / proxy trust still needs fixing separately.
 
 volumes:
   colab-oauth-keyring:

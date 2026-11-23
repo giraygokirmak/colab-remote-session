@@ -49,75 +49,44 @@ The server persists Colab's credentials in `keyring` service `google-colab-cli`,
 
 ## Docker quick start
 
-Prerequisites: Docker with volume support and local browser access to the agent's
-MCP callback as documented by your host. The following setup creates one named
-volume for persistent credentials, state, and job results, plus a protected
-passphrase file. The container does not need access to the host Docker socket.
+Prerequisites are Docker Compose with named-volume support and local browser
+access to your agent's MCP callback. No host passphrase file, `docker cp`,
+`chown`, `colab auth`, Google token, or Docker socket is needed.
 
-The image runs as a non-root user. For the Compose configuration, also review
-the read-only root filesystem, `tmpfs`, capability, and no-new-privileges
-settings below before choosing a public deployment.
-
-```sh
-docker build --pull -t colab-remote-mcp:0.1.0 .
-docker volume create colab-oauth-keyring
-
-# Prepare the layout and a non-personal encryption passphrase. Do not use a Docker or personal Google token.
-docker run --rm --user 0:0 -v colab-oauth-keyring:/data --entrypoint colab-remote-secrets colab-remote-mcp:0.1.0 generate /data/secrets
-docker run --rm -d --name colab-init --entrypoint sleep colab-remote-mcp:0.1.0 600
-docker cp colab-init:/data/secrets/keyring.password ./keyring.password
-chmod 600 keyring.password
-# The non-root image user must own its private 0600 secret file too.
-sudo chown 10001:10001 keyring.password
-docker rm -f colab-init
-
-# Password file (filename only; never put a key in command arguments). (your shell command may contain only the filename, not a key).
-docker run --rm -it --name colab-remote-mcp \
-  --mount type=volume,source=colab-oauth-keyring,target=/data \
-  --mount type=bind,source="$PWD/keyring.password",target=/run/keyring.password,readonly \
-  -p 127.0.0.1:8000:8000 colab-remote-mcp:0.1.0 \
-  --public-url http://127.0.0.1:8000 --keyring-password-file /run/keyring.password
-```
-
-Alternatively, use `--keyring-password-stdin` inside an interactive container (`docker run -it`, without the bind). `--keyring-password` is a development/secret-manager fallback only; do not put it in shell history, compose, environment variables, or agent tool arguments.
-
-#### Troubleshooting the passphrase mount
-
-The server intentionally refuses a missing source, a directory or symbolic link,
-permissions granting group/other access, or an unreadable passphrase file. The
-container user is `10001:10001`, so a host `chmod 600` file owned by another user
-is secure but still unreadable. Fix both properties on the host:
+The Docker image runs as uid **10001**. The Compose deployment has a read-only
+root filesystem, no added capabilities, `no-new-privileges`, a `/tmp` tmpfs, and
+one persistent named volume for the keyring, authorization state, and results.
+On a fresh volume, the entrypoint generates a random passphrase at
+`/data/secrets/keyring.password` with mode **0600**; every later startup reuses
+that same unchanged file. It never prints or exposes the generated value through
+MCP. The encrypted Colab credential record lives beside it inside the same
+volume, not on the host.
 
 ```sh
-# Inspect only file metadata; never paste or print the passphrase itself.
-stat -c '%F mode=%a owner=%u:%g' ./keyring.password
-sudo chown 10001:10001 ./keyring.password
-chmod 600 ./keyring.password
+cd /path/to/colab-remote-session
+docker compose up -d --build
+docker compose logs --tail=50 mcp
 ```
 
-If Docker created an empty `./keyring.password` **directory** because the source
-file was missing, first remove only that empty directory and recover the already
-created passphrase from the persistent volume. For the documented image and
-volume name (not a Compose-prefixed volume name), run:
+The example publishes the MCP listener on host port **6012**. The listener binds
+`0.0.0.0` inside the container so the port forward works; this does not mean that
+`0.0.0.0` is a public OAuth URL. For public deployment, set
+`--public-url=https://mcp.example.org --proxy-headers` only behind your trusted
+HTTPS reverse proxy. Do not expose plain HTTP to untrusted networks. Replace the
+port mapping with `127.0.0.1:8000:8000` for loopback-only use.
 
 ```sh
-docker compose stop mcp  # if using Compose
-sudo rmdir ./keyring.password  # succeeds only if it is an empty directory
-umask 077
-docker run --rm --user 0:0 -v colab-oauth-keyring:/data \
-  --entrypoint sh colab-remote-mcp:0.1.0 \
-  -c 'cat /data/secrets/keyring.password' > ./keyring.password
-sudo chown 10001:10001 ./keyring.password
-chmod 600 ./keyring.password
-docker compose up -d --build mcp
+opencode mcp add colab --url http://127.0.0.1:6012/mcp
 ```
 
-Use `docker volume ls` to find Compose's actual `<project>_colab-oauth-keyring`
-volume name and substitute it above when it differs. If `/data/secrets/keyring.password`
-also does not exist, this is a fresh initialization rather than a password-file
-permission error: generate it with the earlier `colab-remote-secrets generate`
-command. **Never replace a passphrase that still protects existing Colab
-credentials**; a changed passphrase cannot decrypt the existing keyring.
+OpenCode `/mcps` then starts the single Google Colab authorization flow described
+above. No additional host credential setup is required.
+
+For local non-Compose secret-manager integrations, you may override the image
+entrypoint to `colab-remote-mcp` and explicitly use `--keyring-password-stdin` or
+a protected `--keyring-password-file`. `--keyring-password` is a development-only
+fallback; never put it in shell history, Compose, environment variables, or agent
+tool arguments. These optional mechanisms are not needed for normal Docker use.
 
 For non-loopback access, put the single process behind TLS, configure the externally reachable HTTPS origin (no path) using `MCP_PUBLIC_URL=https://mcp.example.org`, and use the compose service as an example. Do not publish HTTP port 8000 directly. The authorization state is not bearer authentication and does not enable `/mcp`;
 `/oauth/complete` accepts only a state issued to a known dynamic client, and its
@@ -127,7 +96,26 @@ To test locally with MCP Inspector, create a self-signed certificate so RFC 8414
 
 ### Restarting
 
-The encryption passphrase and `colab-oauth-keyring` volume must survive together. Stop/start/rebuild the same command without recreating either. If either is lost, MCP reconnect triggers the one real Colab flow again; there is no separate CLI action. Losing the MCP bearer cache also replays the same flow; no second auth service is involved.
+Keep the Compose project name and its `colab-oauth-keyring` volume stable across
+rebuilds. `docker compose up -d --build`, stop, and start preserve both the
+generated passphrase and encrypted Colab keyring. Do **not** run
+`docker compose down -v`; it deletes the credential volume. If the volume is
+deleted, a new passphrase is generated and Google authorization must be repeated.
+If only the MCP client’s bearer cache is lost, reconnect: no new Google token or
+second auth command is required.
+
+For an existing empty volume created by an older deployment whose ownership was
+not initialized, fix ownership once and restart:
+
+```sh
+docker compose run --rm --user root mcp chown -R 10001:10001 /data
+docker compose up -d --force-recreate
+```
+
+A host `keyring.password` file or directory left beside `docker-compose.yml` is
+now ignored and may be removed after checking that it is the unused empty
+directory. It is no longer involved in startup.
+
 
 ## MCP clients
 
@@ -199,14 +187,15 @@ CPU limits depend on Colab runtime details and ordinary agent-supplied work. The
 
 ## Development/verification
 
-The current local verification run passes **39 tests**, Ruff checks, and Python
+The current local verification run passes **51 tests**, Ruff checks, and Python
 bytecode compilation. These are offline unit and loopback integration checks;
 they do not certify a Docker build, Google authorization, or real Colab quota.
 
-For the Compose deployment, complete the same volume and passphrase-generation
-steps above, then uncomment its loopback port mapping and run `docker compose up
--d --build`. In a reverse-proxy deployment, change `--public-url` to the exact
-external HTTPS origin and publish the service only through that trusted proxy.
+For the Compose deployment, simply run `docker compose up -d --build`; the
+volume-held key creation and restart preservation are automatic. In a public
+reverse-proxy deployment, change the command's `--public-url` to the exact
+external HTTPS origin, add `--proxy-headers`, and publish only through that
+trusted proxy. The local test suite does not need a Docker daemon.
 
 ```sh
 python3.12 -m venv /tmp/colab-mcp-dev
@@ -220,7 +209,8 @@ Tests mock Colab assignment/runtime/contents boundaries and use only isolated te
 ## Data placement / operations
 
 - `/data/secrets/keyring/crypted_pass.cfg`: encrypted Colab token.
-- `/data/secrets/keyring.password` (created via generator, bind-mounted): passphrase only. This does not go into state.json or tool output.
+- `/data/secrets/keyring.password`: randomly generated at first volume bootstrap,
+  then reused unchanged; mode 0600, never host-bound or printed.
 - `/data/state.json`: MCP dynamic client registrations, pending state and SHA-256-hashed bearer credentials. Server-only 0600; no Google runtime URL/token or plaintext MCP bearer token.
 - `/data/jobs/<random job ID>/job.json`: per-owner job status, event cursor and persisted event-prefix SHA-256 checkpoint; mode 0600.
 - `/data/jobs/<random job ID>/events.jsonl`: bounded stdout/tracebacks/text display/reference events for restart recovery and cursor polling; not bare binary HTML to a browser.

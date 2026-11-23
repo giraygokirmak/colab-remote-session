@@ -22,5 +22,5 @@ USER 10001:10001
 EXPOSE 8000
 VOLUME ["/data"]
 WORKDIR /data
-ENTRYPOINT ["colab-remote-mcp"]
-CMD ["--public-url", "http://127.0.0.1:8000", "--keyring-password-file", "/run/keyring.password"]
+ENTRYPOINT ["python", "/usr/local/bin/colab-remote-keyring-entrypoint"]
+CMD ["--public-url", "http://127.0.0.1:8000"]
