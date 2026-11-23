@@ -10,19 +10,25 @@ services:
       - colab-oauth-keyring:/data
       - type: bind
         source: ./keyring.password
-        target: /run/keyring.password
+        # If the source is missing, Docker can auto-create /run/secrets/keyring.password
+        # as a directory. The entrypoint stops with an actionable error, not a loop.
+        target: /run/secrets/keyring.password
         read_only: true
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
+      - /run/secrets:size=64m,mode=1777
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     init: true
+    # Validates file type, ownership and mode before reading the passphrase in config.
+    # No passphrase value is included in argv, environment or error output.
+    entrypoint: ["python", "/usr/local/bin/colab-remote-keyring-entrypoint"]
     command:
       - --public-url=http://127.0.0.1:8000
-      - --keyring-password-file=/run/keyring.password
+      - --keyring-password-file=/run/secrets/keyring.password
 
 volumes:
   colab-oauth-keyring:

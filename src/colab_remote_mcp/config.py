@@ -81,6 +81,39 @@ def _validate_binding(host: str) -> None:
         raise ConfigurationError("Bind address must be a literal IP address.") from error
 
 
+def read_password_file(source: Path) -> str:
+    """Read a protected local passphrase, diagnosing only the file's kind and mode."""
+    path = source.expanduser()
+    try:
+        if path.is_symlink():
+            raise ConfigurationError("Passphrase input must not be a symbolic link.")
+        if not path.exists():
+            raise ConfigurationError(
+                "Passphrase file is missing. Generate it, then mount the actual "
+                "mode-0600 file readable by the container user; it is not a Google token."
+            )
+        if not path.is_file():
+            raise ConfigurationError(
+                "Passphrase input is not a regular file. If Docker auto-created an "
+                "empty mount directory, remove that empty directory and provide the file."
+            )
+        mode = path.stat().st_mode & 0o777
+        if mode & 0o077:
+            raise ConfigurationError(
+                f"Passphrase file has mode 0{mode:o}; group/other permissions must be "
+                "removed with chmod 600. The file must also be readable by the "
+                "container user (default uid 10001)."
+            )
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        # OS/decoding errors may contain paths or credential-like input bytes.
+        raise ConfigurationError(
+            "Passphrase file could not be read; ensure it is a UTF-8 regular file "
+            "readable by the container user (default uid 10001)."
+        ) from None
+    return lines[0] if lines else ""
+
+
 def parse_args(argv: list[str] | None = None) -> Config:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -110,12 +143,7 @@ def parse_args(argv: list[str] | None = None) -> Config:
 
         password = sys.stdin.readline().rstrip("\r\n")
     elif options.keyring_password_file:
-        path = options.keyring_password_file.expanduser()
-        if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
-            raise ConfigurationError(
-                "Passphrase input must be a regular mode-0600 non-symlink file."
-            )
-        password = path.read_text(encoding="utf-8").splitlines()[0]
+        password = read_password_file(options.keyring_password_file)
     if password is None:
         raise ConfigurationError(
             "Provide a local keyring passphrase once using --keyring-password-file or "

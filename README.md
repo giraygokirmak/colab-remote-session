@@ -67,9 +67,11 @@ docker run --rm --user 0:0 -v colab-oauth-keyring:/data --entrypoint colab-remot
 docker run --rm -d --name colab-init --entrypoint sleep colab-remote-mcp:0.1.0 600
 docker cp colab-init:/data/secrets/keyring.password ./keyring.password
 chmod 600 keyring.password
+# The non-root image user must own its private 0600 secret file too.
+sudo chown 10001:10001 keyring.password
 docker rm -f colab-init
 
-# Preferred: stdin (your shell command may contain only the filename, not a key).
+# Password file (filename only; never put a key in command arguments). (your shell command may contain only the filename, not a key).
 docker run --rm -it --name colab-remote-mcp \
   --mount type=volume,source=colab-oauth-keyring,target=/data \
   --mount type=bind,source="$PWD/keyring.password",target=/run/keyring.password,readonly \
@@ -78,6 +80,44 @@ docker run --rm -it --name colab-remote-mcp \
 ```
 
 Alternatively, use `--keyring-password-stdin` inside an interactive container (`docker run -it`, without the bind). `--keyring-password` is a development/secret-manager fallback only; do not put it in shell history, compose, environment variables, or agent tool arguments.
+
+#### Troubleshooting the passphrase mount
+
+The server intentionally refuses a missing source, a directory or symbolic link,
+permissions granting group/other access, or an unreadable passphrase file. The
+container user is `10001:10001`, so a host `chmod 600` file owned by another user
+is secure but still unreadable. Fix both properties on the host:
+
+```sh
+# Inspect only file metadata; never paste or print the passphrase itself.
+stat -c '%F mode=%a owner=%u:%g' ./keyring.password
+sudo chown 10001:10001 ./keyring.password
+chmod 600 ./keyring.password
+```
+
+If Docker created an empty `./keyring.password` **directory** because the source
+file was missing, first remove only that empty directory and recover the already
+created passphrase from the persistent volume. For the documented image and
+volume name (not a Compose-prefixed volume name), run:
+
+```sh
+docker compose stop mcp  # if using Compose
+sudo rmdir ./keyring.password  # succeeds only if it is an empty directory
+umask 077
+docker run --rm --user 0:0 -v colab-oauth-keyring:/data \
+  --entrypoint sh colab-remote-mcp:0.1.0 \
+  -c 'cat /data/secrets/keyring.password' > ./keyring.password
+sudo chown 10001:10001 ./keyring.password
+chmod 600 ./keyring.password
+docker compose up -d --build mcp
+```
+
+Use `docker volume ls` to find Compose's actual `<project>_colab-oauth-keyring`
+volume name and substitute it above when it differs. If `/data/secrets/keyring.password`
+also does not exist, this is a fresh initialization rather than a password-file
+permission error: generate it with the earlier `colab-remote-secrets generate`
+command. **Never replace a passphrase that still protects existing Colab
+credentials**; a changed passphrase cannot decrypt the existing keyring.
 
 For non-loopback access, put the single process behind TLS, configure the externally reachable HTTPS origin (no path) using `MCP_PUBLIC_URL=https://mcp.example.org`, and use the compose service as an example. Do not publish HTTP port 8000 directly. The authorization state is not bearer authentication and does not enable `/mcp`;
 `/oauth/complete` accepts only a state issued to a known dynamic client, and its

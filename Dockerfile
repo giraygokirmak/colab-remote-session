@@ -12,7 +12,9 @@ RUN groupadd --gid 10001 --system mcp \
 WORKDIR /opt/colab-remote-mcp
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN python -m pip install --no-cache-dir --no-compile . \
+COPY docker-keyring-entrypoint.py /usr/local/bin/colab-remote-keyring-entrypoint
+RUN chmod 0555 /usr/local/bin/colab-remote-keyring-entrypoint \
+    && python -m pip install --no-cache-dir --no-compile . \
     && mkdir /data \
     && chown mcp:mcp /data
 
