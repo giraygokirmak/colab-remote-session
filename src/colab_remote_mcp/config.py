@@ -25,6 +25,7 @@ class Config(argparse.Namespace):
     keyring_root: Path
     data: Path
     proxy_headers: bool
+    allow_nonloopback_bind: bool
 
     def __init__(
         self,
@@ -35,6 +36,7 @@ class Config(argparse.Namespace):
         keyring_root: Path | None = None,
         data: Path | None = None,
         proxy_headers: bool = False,
+        allow_nonloopback_bind: bool = False,
     ) -> None:
         value = public_url.rstrip("/")
         parts = urlsplit(value)
@@ -55,9 +57,10 @@ class Config(argparse.Namespace):
             raise ConfigurationError(
                 "Nonloopback deployment requires HTTPS through a reverse proxy."
             )
-        if loopback and host != DEFAULT_HOST:
+        if loopback and host != DEFAULT_HOST and not allow_nonloopback_bind:
             raise ConfigurationError(
-                "Loopback public URL cannot be bound to a nonloopback address."
+                "Loopback public URL requires loopback binding unless "
+                "--allow-nonloopback-bind explicitly enables isolated Docker/TLS forwarding."
             )
         if not loopback and not proxy_headers:
             raise ConfigurationError(
@@ -72,6 +75,7 @@ class Config(argparse.Namespace):
         self.keyring_root = keyring_root or (data or DEFAULT_DATA) / "secrets" / "keyring"
         self.data = data or DEFAULT_DATA
         self.proxy_headers = proxy_headers
+        self.allow_nonloopback_bind = allow_nonloopback_bind
 
 
 def _validate_binding(host: str) -> None:
@@ -124,6 +128,14 @@ def parse_args(argv: list[str] | None = None) -> Config:
     parser.add_argument("--port", type=int, default=int(os.getenv("MCP_PORT", "8000")))
     parser.add_argument("--data", type=Path, default=Path(os.getenv("MCP_DATA", str(DEFAULT_DATA))))
     parser.add_argument("--proxy-headers", action="store_true")
+    parser.add_argument(
+        "--allow-nonloopback-bind",
+        action="store_true",
+        help=(
+            "Allow a container/TLS proxy to bind a loopback public origin to a "
+            "non-loopback listener; the client-facing URL remains unchanged."
+        ),
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--keyring-password",
@@ -159,4 +171,5 @@ def parse_args(argv: list[str] | None = None) -> Config:
         keyring_root=options.keyring_root,
         data=options.data.expanduser(),
         proxy_headers=options.proxy_headers,
+        allow_nonloopback_bind=options.allow_nonloopback_bind,
     )

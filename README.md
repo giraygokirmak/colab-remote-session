@@ -69,11 +69,15 @@ docker compose logs --tail=50 mcp
 ```
 
 The example publishes the MCP listener on host port **6012**. The listener binds
-`0.0.0.0` inside the container so the port forward works; this does not mean that
-`0.0.0.0` is a public OAuth URL. For public deployment, set
+`0.0.0.0` inside the container so Docker's port forward works; its public OAuth
+origin remains `http://127.0.0.1:6012`. `--allow-nonloopback-bind` explicitly
+permits this forwarding distinction. The example mapping exposes the host port
+on all interfaces, so use it only on a trusted host/network or restrict it to
+`127.0.0.1:6012:8000`; it does not expose the passphrase. `0.0.0.0` is not a
+client-facing URL. For public deployment, set
 `--public-url=https://mcp.example.org --proxy-headers` only behind your trusted
 HTTPS reverse proxy. Do not expose plain HTTP to untrusted networks. Replace the
-port mapping with `127.0.0.1:8000:8000` for loopback-only use.
+port mapping to `127.0.0.1:6012:8000` for loopback-only use.
 
 ```sh
 opencode mcp add colab --url http://127.0.0.1:6012/mcp
@@ -187,7 +191,7 @@ CPU limits depend on Colab runtime details and ordinary agent-supplied work. The
 
 ## Development/verification
 
-The current local verification run passes **51 tests**, Ruff checks, and Python
+The current local verification run passes **53 tests**, Ruff checks, and Python
 bytecode compilation. These are offline unit and loopback integration checks;
 they do not certify a Docker build, Google authorization, or real Colab quota.
 

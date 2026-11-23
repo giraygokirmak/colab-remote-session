@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from colab_remote_mcp.config import ConfigurationError, parse_args, read_password_file
+from colab_remote_mcp.config import Config, ConfigurationError, parse_args, read_password_file
 
 
 @pytest.mark.parametrize(
@@ -55,6 +55,30 @@ def test_password_file_reads_valid_protected_input(tmp_path: Path) -> None:
     config = parse_args(["--keyring-password-file", str(path)])
     assert config.keyring_password == "fixture-only-secret"
     assert read_password_file(path) == "fixture-only-secret"
+
+
+FORWARD_LISTENER_HOST = "0.0.0.0"  # noqa: S104 - explicit Docker forwarding fixture.
+
+
+def test_docker_forwarding_preserves_loopback_public_origin() -> None:
+    config = parse_args(
+        [
+            "--keyring-password",
+            "fixture-only-secret",
+            f"--host={FORWARD_LISTENER_HOST}",
+            "--public-url=http://127.0.0.1:6012",
+            "--allow-nonloopback-bind",
+        ]
+    )
+    assert config.public_url == "http://127.0.0.1:6012"
+    assert config.host == FORWARD_LISTENER_HOST
+    assert config.port == 8000
+    assert config.allow_nonloopback_bind
+
+
+def test_nonloopback_bind_still_requires_an_explicit_opt_in() -> None:
+    with pytest.raises(ConfigurationError, match="allow-nonloopback-bind"):
+        Config(host=FORWARD_LISTENER_HOST, keyring_password="fixture-only-secret")
 
 
 def load_entrypoint():

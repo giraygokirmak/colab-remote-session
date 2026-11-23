@@ -3,7 +3,8 @@ services:
     build: .
     image: colab-remote-mcp:0.1.0
     restart: unless-stopped
-    # Non-loopback plain HTTP is intended for a trusted local tunnel/proxy only.
+    # Docker forwards the host port to the container listener. The public OAuth
+    # origin is the client-facing host loopback URL, not the 0.0.0.0 bind address.
     ports:
       - "6012:8000"
     # The only persistent storage is this named volume. In particular, no host
@@ -26,7 +27,8 @@ services:
     entrypoint: ["python", "/usr/local/bin/colab-remote-keyring-entrypoint"]
     command:
       - --host=0.0.0.0
-      # Missing HTTPS public origin / proxy trust still needs fixing separately.
+      - --public-url=http://127.0.0.1:6012
+      - --allow-nonloopback-bind
 
 volumes:
   colab-oauth-keyring:
