@@ -13,6 +13,17 @@ from colab_remote_mcp.store import private_directory
 PASSWORD_PATH = Path("/data/secrets/keyring.password")
 
 
+def prepare_data_directory(path: Path, *, euid: int | None = None) -> None:
+    """Secure the volume root without deleting or moving any existing content."""
+    if path.is_symlink() or not path.is_dir():
+        raise PermissionError("The persistent data mount must be a real directory.")
+    effective_uid = os.geteuid() if euid is None else euid
+    if effective_uid != 0 and path.stat().st_uid != effective_uid:
+        raise PermissionError("The persistent data mount is owned by another uid.")
+    path.chmod(0o700, follow_symlinks=False)
+    private_directory(path)
+
+
 def validate_existing(path: Path) -> None:
     if not read_password_file(path):
         raise ValueError("Volume-held keyring passphrase must not be empty.")
@@ -58,13 +69,14 @@ def ensure_password(directory: Path) -> None:
 def main() -> None:
     path = PASSWORD_PATH
     try:
+        prepare_data_directory(path.parent.parent)
         ensure_password(path.parent)
     except (OSError, ValueError):
         # Storage errors can contain sensitive paths or data. Fixed safe text only.
         print(
-            "Could not create or unlock /data/secrets/keyring.password. "
-            "Mount a writable persistent volume at /data owned by uid 10001; "
-            "do not mount a host passphrase file.",
+            "Could not secure /data or create the volume-held keyring passphrase. "
+            "Run the one-time root ownership repair documented in README.md when "
+            "upgrading an older volume; its existing files are preserved.",
             file=sys.stderr,
         )
         raise SystemExit(1) from None

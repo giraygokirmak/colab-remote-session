@@ -90,8 +90,45 @@ def load_entrypoint():
     return module
 
 
+def test_volume_data_directory_is_secured_without_deleting_content(
+    tmp_path: Path,
+) -> None:
+    entrypoint = load_entrypoint()
+    marker = tmp_path / "state.json"
+    marker.touch(mode=0o600)
+    tmp_path.chmod(0o755)
+    entrypoint.prepare_data_directory(tmp_path)
+    assert tmp_path.stat().st_mode & 0o777 == 0o700
+    assert marker.exists()
+    entrypoint.prepare_data_directory(tmp_path)
+    assert marker.exists()
+
+
+def test_volume_data_directory_does_not_claim_another_users_mount(
+    tmp_path: Path,
+) -> None:
+    entrypoint = load_entrypoint()
+    tmp_path.chmod(0o755)
+    other_uid = 1 if tmp_path.stat().st_uid != 1 else 2
+    with pytest.raises(PermissionError, match="owned by another uid"):
+        entrypoint.prepare_data_directory(tmp_path, euid=other_uid)
+    assert tmp_path.stat().st_mode & 0o777 == 0o755
+
+
+def test_volume_data_directory_rejects_symlink(tmp_path: Path) -> None:
+    entrypoint = load_entrypoint()
+    actual = tmp_path / "actual"
+    actual.mkdir(mode=0o700)
+    symlink = tmp_path / "link"
+    symlink.symlink_to(actual, target_is_directory=True)
+    with pytest.raises(PermissionError, match="real directory"):
+        entrypoint.prepare_data_directory(symlink)
+    assert actual.stat().st_mode & 0o777 == 0o700
+
+
 def test_volume_passphrase_is_created_once_and_reused(tmp_path: Path) -> None:
     entrypoint = load_entrypoint()
+    entrypoint.prepare_data_directory(tmp_path)
     directory = tmp_path / "secrets"
     entrypoint.ensure_password(directory)
     path = directory / "keyring.password"

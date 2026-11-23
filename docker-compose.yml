@@ -11,9 +11,9 @@ services:
     # password file, Docker socket, SSH agent or environment credential is bound.
     volumes:
       - colab-oauth-keyring:/data
-    # If the volume is newly created on an existing service, reset its ownership
-    # once with docker compose run --rm --user root mcp chown 10001:10001 /data.
-    # New empty volumes receive uid 10001 from the Docker image automatically.
+    # New empty volumes inherit /data as mode 0700, owned by uid 10001. The
+    # entrypoint also tightens permissions on a volume root already owned by
+    # uid 10001; it never deletes, moves or recursively chowns stored content.
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777

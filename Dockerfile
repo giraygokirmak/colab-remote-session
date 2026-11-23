@@ -15,8 +15,7 @@ COPY src ./src
 COPY docker-keyring-entrypoint.py /usr/local/bin/colab-remote-keyring-entrypoint
 RUN chmod 0555 /usr/local/bin/colab-remote-keyring-entrypoint \
     && python -m pip install --no-cache-dir --no-compile . \
-    && mkdir /data \
-    && chown mcp:mcp /data
+    && install -d -m 0700 -o mcp -g mcp /data
 
 USER 10001:10001
 EXPOSE 8000

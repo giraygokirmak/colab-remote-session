@@ -108,11 +108,22 @@ deleted, a new passphrase is generated and Google authorization must be repeated
 If only the MCP client’s bearer cache is lost, reconnect: no new Google token or
 second auth command is required.
 
-For an existing empty volume created by an older deployment whose ownership was
-not initialized, fix ownership once and restart:
+New empty volumes inherit `/data` as mode **0700**, owned by **10001:10001**.
+At every startup the entrypoint secures this root directory without deleting
+or moving existing files. If an older Docker Desktop installation preserves a
+different uid and still reports an ownership error, use this one-time,
+non-destructive ownership repair (it does not regenerate or read credentials):
 
 ```sh
-docker compose run --rm --user root mcp chown -R 10001:10001 /data
+docker compose stop mcp
+# Inspect only the stopped container's mount metadata; do not print credentials.
+CONTAINER="$(docker compose ps -aq mcp)"
+VOLUME="$(docker inspect "$CONTAINER" --format \
+  '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+test -n "$VOLUME"
+# Repair the existing named volume; never recreate it or print its contents.
+docker run --rm --user 0:0 -v "$VOLUME:/data" --entrypoint chown \
+  colab-remote-mcp:0.1.0 -R 10001:10001 /data
 docker compose up -d --force-recreate
 ```
 
@@ -191,7 +202,7 @@ CPU limits depend on Colab runtime details and ordinary agent-supplied work. The
 
 ## Development/verification
 
-The current local verification run passes **53 tests**, Ruff checks, and Python
+The current local verification run passes **56 tests**, Ruff checks, and Python
 bytecode compilation. These are offline unit and loopback integration checks;
 they do not certify a Docker build, Google authorization, or real Colab quota.
 
